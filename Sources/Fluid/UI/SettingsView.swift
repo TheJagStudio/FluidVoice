@@ -1396,7 +1396,7 @@ struct SettingsView: View {
                         VStack(alignment: .leading, spacing: 8) {
                             HStack(alignment: .center) {
                                 VStack(alignment: .leading, spacing: 2) {
-                                    Text("Dictation Speed")
+                                    Text("Dictation Processing Speed")
                                         .font(.body)
                                     Text(self.settings.parakeetFinalizationMode.detailText)
                                         .font(.caption)
@@ -1415,15 +1415,10 @@ struct SettingsView: View {
                                 .disabled(self.asr.isRunning)
                             }
 
-                            VStack(alignment: .leading, spacing: 4) {
-                                Text("Try Fast if you want dictation to finish quicker.")
-                                Text("Standard: most reliable and best for everyday dictation.")
-                                Text("Fast: quicker, but may be less consistent.")
-                            }
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
-
-                            Text("You can switch back anytime.")
+                            Text("Normal: most reliable.")
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                            Text("Fast: faster, but may be less consistent.")
                                 .font(.caption)
                                 .foregroundStyle(.secondary)
 
