@@ -626,27 +626,29 @@ final class MenuBarManager: NSObject, ObservableObject, NSMenuDelegate {
         // Activate the app and bring it to the front
         NSApp.activate(ignoringOtherApps: true)
 
+        var mainWindows = NSApp.windows.filter(self.isFluidMainWindow)
+        if let hostedWindow,
+           mainWindows.contains(where: { $0 !== hostedWindow })
+        {
+            hostedWindow.close()
+            self.hostedWindow = nil
+            mainWindows = NSApp.windows.filter(self.isFluidMainWindow)
+        }
+
         // Find an existing *non-minimized* primary window.
         // Important: avoid programmatic deminiaturize() — it creates internal window transform animations
         // (NSWindowTransformAnimation) that have been unstable on macOS 26.x for this app.
-        if let window = hostedWindow, window.isReleasedWhenClosed == false {
+        if let window = mainWindows.first {
             self.ensureUsableMainWindow(window)
             window.animationBehavior = .none
             self.bringToFront(window)
-        } else if let window = NSApp.windows.first(where: { win in
-            // Only normal app windows (exclude overlays/panels/menus)
-            guard win.level == .normal else { return false }
-            guard win.styleMask.contains(.titled) else { return false }
-            guard win.canBecomeKey else { return false }
-            guard win.isMiniaturized == false else { return false }
-
-            // Prefer our main window title when present (both SwiftUI and our fallback window use this)
-            return win.title == "FluidVoice" || win.title.contains("FluidVoice")
-        }) {
+            if let hostedWindow, window !== hostedWindow {
+                self.hostedWindow = nil
+            }
+        } else if let window = hostedWindow, window.isReleasedWhenClosed == false {
             self.ensureUsableMainWindow(window)
             window.animationBehavior = .none
             self.bringToFront(window)
-            self.hostedWindow = window
         } else {
             // If there is no suitable window (or it's minimized), create a fresh one.
             self.createAndShowMainWindow()
@@ -657,6 +659,14 @@ final class MenuBarManager: NSObject, ObservableObject, NSMenuDelegate {
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.08) {
             NSApp.activate(ignoringOtherApps: true)
         }
+    }
+
+    private func isFluidMainWindow(_ window: NSWindow) -> Bool {
+        guard window.level == .normal else { return false }
+        guard window.styleMask.contains(.titled) else { return false }
+        guard window.canBecomeKey else { return false }
+        guard window.isMiniaturized == false else { return false }
+        return window.title == "FluidVoice" || window.title.contains("FluidVoice")
     }
 
     @objc private func openPreferences() {

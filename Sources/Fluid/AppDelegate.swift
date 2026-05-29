@@ -12,6 +12,8 @@ import UserNotifications
 
 class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCenterDelegate {
     private var updateCheckTimer: Timer?
+    private var didRevealMainWindowOnLaunch = false
+    private var didRequestMainWindowReopen = false
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         // Bring up file logging + crash handlers immediately during launch.
@@ -47,9 +49,8 @@ class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCenterDele
         // Schedule periodic update checks every hour while app is running
         self.schedulePeriodicUpdateChecks()
 
-        // Bring the app to front on initial launch.
-        // Use a few delayed retries because SwiftUI window creation can lag app launch callbacks.
-        self.forceFrontOnLaunch()
+        // Login Items can launch hidden; reveal the real SwiftUI window so ContentView startup runs.
+        self.openMainWindowOnLaunch()
 
         // Note: App UI is designed with dark color scheme in mind
         // All gradients and effects are optimized for dark mode
@@ -65,15 +66,7 @@ class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCenterDele
     func applicationShouldHandleReopen(_ sender: NSApplication, hasVisibleWindows flag: Bool) -> Bool {
         // Ensure dock-icon reopen always foregrounds FluidVoice.
         sender.activate(ignoringOtherApps: true)
-
-        if let mainWindow = sender.windows.first(where: { win in
-            guard win.level == .normal else { return false }
-            guard win.styleMask.contains(.titled) else { return false }
-            return win.title == "FluidVoice" || win.title.contains("FluidVoice")
-        }) {
-            mainWindow.orderFrontRegardless()
-            mainWindow.makeKeyAndOrderFront(nil)
-        }
+        self.bringMainWindowToFrontIfPresent()
 
         return true
     }
@@ -102,40 +95,70 @@ class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCenterDele
         completionHandler()
     }
 
-    private func forceFrontOnLaunch() {
-        // Login-item launches can take longer before SwiftUI's main window exists.
-        // Keep retrying while FluidVoice is still foregrounded, but stop if the user switches away.
-        for delay in [0.0, 0.12, 0.35, 1.0, 2.0, 4.0] {
+    private func openMainWindowOnLaunch() {
+        NSApp.setActivationPolicy(SettingsStore.shared.showInDock ? .regular : .accessory)
+
+        for delay in [0.1, 0.6, 1.2, 2.5, 4.0] {
             DispatchQueue.main.asyncAfter(deadline: .now() + delay) { [weak self] in
                 guard let self else { return }
-                guard delay == 0.0 || self.shouldContinueLaunchForegroundRetry() else {
-                    DebugLogger.shared.debug("Skipped launch-front retry because another app is active", source: "AppDelegate")
+                guard self.didRevealMainWindowOnLaunch == false else { return }
+
+                NSApp.unhide(nil)
+                NSApp.activate(ignoringOtherApps: true)
+
+                if self.bringMainWindowToFrontIfPresent() {
+                    self.didRevealMainWindowOnLaunch = true
                     return
                 }
-                self.bringMainWindowToFront()
+
+                DebugLogger.shared.debug("Main window not ready during launch reveal retry", source: "AppDelegate")
+                if delay >= 0.6 {
+                    self.requestMainWindowReopenIfNeeded()
+                }
             }
         }
     }
 
-    private func shouldContinueLaunchForegroundRetry() -> Bool {
-        if NSApp.isActive { return true }
-        return NSWorkspace.shared.frontmostApplication?.processIdentifier == ProcessInfo.processInfo.processIdentifier
+    private func requestMainWindowReopenIfNeeded() {
+        guard !self.didRequestMainWindowReopen else { return }
+        self.didRequestMainWindowReopen = true
+
+        let configuration = NSWorkspace.OpenConfiguration()
+        configuration.activates = true
+
+        DebugLogger.shared.info("Requesting LaunchServices reopen to create SwiftUI main window", source: "AppDelegate")
+        NSWorkspace.shared.openApplication(at: Bundle.main.bundleURL, configuration: configuration) { _, error in
+            if let error {
+                DebugLogger.shared.error("LaunchServices reopen failed: \(error.localizedDescription)", source: "AppDelegate")
+            }
+        }
     }
 
     private func bringMainWindowToFront() {
+        NSApp.unhide(nil)
         NSApp.activate(ignoringOtherApps: true)
 
-        if let mainWindow = NSApp.windows.first(where: { win in
-            guard win.level == .normal else { return false }
-            guard win.styleMask.contains(.titled) else { return false }
-            return win.title == "FluidVoice" || win.title.contains("FluidVoice")
-        }) {
+        if !self.bringMainWindowToFrontIfPresent() {
+            DebugLogger.shared.debug("Main window not ready", source: "AppDelegate")
+        }
+    }
+
+    @discardableResult
+    private func bringMainWindowToFrontIfPresent() -> Bool {
+        if let mainWindow = NSApp.windows.first(where: self.isMainWindow) {
             mainWindow.orderFrontRegardless()
             mainWindow.makeKeyAndOrderFront(nil)
             DebugLogger.shared.debug("Brought main window to front", source: "AppDelegate")
-        } else {
-            DebugLogger.shared.debug("Main window not ready yet during launch-front retry", source: "AppDelegate")
+            return true
         }
+
+        return false
+    }
+
+    private func isMainWindow(_ window: NSWindow) -> Bool {
+        guard window.level == .normal else { return false }
+        guard window.styleMask.contains(.titled) else { return false }
+        return window.title == "FluidVoice" || window.title.contains("FluidVoice")
     }
 
     // MARK: - Periodic Update Checks

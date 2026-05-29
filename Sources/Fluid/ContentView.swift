@@ -630,6 +630,7 @@ struct ContentView: View {
                 }
             }
         }
+        .toolbar(removing: .sidebarToggle)
         .overlay(alignment: .center) {}
         .alert(
             self.asr.errorTitle,
