@@ -198,17 +198,6 @@ struct WelcomeView: View {
                                         .font(self.theme.typography.caption)
                                         .foregroundStyle(.secondary)
                                 }
-
-                                if !self.asr.finalText.isEmpty {
-                                    Button {
-                                        NSPasteboard.general.clearContents()
-                                        NSPasteboard.general.setString(self.asr.finalText, forType: .string)
-                                    } label: {
-                                        Label("Copy", systemImage: "doc.on.doc")
-                                    }
-                                    .buttonStyle(.bordered)
-                                    .controlSize(.small)
-                                }
                             }
 
                             if self.settings.selectedSpeechModel == .parakeetTDT || self.settings.selectedSpeechModel == .parakeetTDTv2 {
@@ -229,9 +218,10 @@ struct WelcomeView: View {
                                 )
                             }
 
-                            VStack(alignment: .leading, spacing: 12) {
-                                // Recording Control
-                                VStack(spacing: 10) {
+                            VStack(alignment: .leading, spacing: 14) {
+                                // Recording Control — centered button
+                                HStack {
+                                    Spacer()
                                     Button {
                                         if self.asr.isRunning {
                                             Task {
@@ -243,25 +233,18 @@ struct WelcomeView: View {
                                             SettingsStore.shared.playgroundUsed = true
                                         }
                                     } label: {
-                                        HStack {
+                                        HStack(spacing: 8) {
                                             Image(systemName: self.asr.isRunning ? "stop.fill" : "mic.fill")
                                             Text(self.asr.isRunning ? "Stop Recording" : "Start Recording")
                                         }
-                                        .frame(maxWidth: .infinity)
+                                        .frame(maxWidth: 220)
                                     }
                                     .fluidButton(.primary, size: .large, isRecording: self.asr.isRunning)
                                     .buttonHoverEffect()
                                     .scaleEffect(!self.reduceMotion && self.asr.isRunning ? 1.02 : 1.0)
                                     .animation(self.reduceMotion ? nil : .spring(response: 0.3), value: self.asr.isRunning)
                                     .disabled(!self.asr.isAsrReady && !self.asr.isRunning)
-
-                                    if !self.asr.isRunning && !self.asr.finalText.isEmpty {
-                                        Button("Clear Results") {
-                                            self.asr.finalText = ""
-                                        }
-                                        .buttonStyle(.bordered)
-                                        .controlSize(.small)
-                                    }
+                                    Spacer()
                                 }
 
                                 // Text Area
@@ -272,7 +255,7 @@ struct WelcomeView: View {
                                     ))
                                     .font(self.theme.typography.body)
                                     .focused(self.isTranscriptionFocused)
-                                    .frame(height: 140)
+                                    .frame(height: 120)
                                     .padding(10)
                                     .background(
                                         RoundedRectangle(cornerRadius: 8, style: .continuous)
@@ -304,9 +287,7 @@ struct WelcomeView: View {
                                                 Image(systemName: "text.bubble")
                                                     .font(self.theme.typography.titleIcon)
                                                     .foregroundStyle(.secondary.opacity(0.5))
-                                                Text("Ready to test!")
-                                                    .font(self.theme.typography.bodySmallStrong)
-                                                Text("Click 'Start Recording' or press your hotkey")
+                                                Text("Press record or your hotkey to begin")
                                                     .font(self.theme.typography.caption)
                                                     .foregroundStyle(.secondary)
                                             }
