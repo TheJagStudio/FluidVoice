@@ -3991,11 +3991,10 @@ final class SettingsStore: ObservableObject {
         }
 
         /// Whether this model supports real-time streaming/chunk processing.
-        /// Whisper preview re-transcribes the growing prefix and shares the final
-        /// transcription executor, so even tiny models can make stop feel stuck.
+        /// Large Whisper models are too slow for streaming, so they only do final transcription on stop.
         var supportsStreaming: Bool {
             switch self {
-            case .qwen3Asr, .whisperTiny, .whisperBase, .whisperSmall, .whisperMedium, .whisperLargeTurbo, .whisperLarge:
+            case .qwen3Asr, .whisperMedium, .whisperLargeTurbo, .whisperLarge:
                 return false // Too slow for real-time chunk processing
             default:
                 return true // All other models support streaming

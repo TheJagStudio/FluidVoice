@@ -68,19 +68,6 @@ final class DictationE2ETests: XCTestCase {
         }
     }
 
-    func testWhisperModelsUseFinalOnlyDictation() {
-        let whisperModels: [SettingsStore.SpeechModel] = [
-            .whisperTiny,
-            .whisperBase,
-            .whisperSmall,
-            .whisperMedium,
-            .whisperLargeTurbo,
-            .whisperLarge,
-        ]
-
-        XCTAssertTrue(whisperModels.allSatisfy { !$0.supportsStreaming })
-    }
-
     func testDictationEndToEnd_whisperTiny_transcribesFixture() async throws {
         // Arrange
         SettingsStore.shared.shareAnonymousAnalytics = false

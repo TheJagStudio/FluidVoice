@@ -198,7 +198,7 @@ extension HotkeyShortcut {
 
     static func normalizedModifierKeyCodes(from modifierKeyCodes: [UInt16]) -> [UInt16] {
         Array(Set(modifierKeyCodes)).compactMap { keyCode -> (UInt16, Int)? in
-            guard let priority = Self.modifierSortPriority(forKeyCode: keyCode) else { return nil }
+            guard let priority = modifierSortPriority(forKeyCode: keyCode) else { return nil }
             return (keyCode, priority)
         }
         .sorted { lhs, rhs in
