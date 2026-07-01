@@ -331,7 +331,7 @@ struct CustomDictionaryView: View {
                         self.manualReplacementComposer
                     }
                 }
-                .frame(height: 315, alignment: .topLeading)
+                .frame(minHeight: 315, alignment: .topLeading)
             }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
@@ -401,7 +401,7 @@ struct CustomDictionaryView: View {
             }
             .fluidButton(.accent, size: .small)
             .disabled(!self.canAddTrainedReplacement)
-            .opacity(self.canAddTrainedReplacement || self.trainingAlreadyCorrectWithoutReplacement ? 1 : 0.45)
+            .opacity(self.canAddTrainedReplacement ? 1 : 0.45)
             .overlay(self.trainedReplacementButtonReadyOutline)
             .shadow(
                 color: self.shouldEmphasizeTrainedReplacementButton ? self.theme.palette.success.opacity(0.18) : .clear,
