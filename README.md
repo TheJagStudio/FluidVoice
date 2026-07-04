@@ -213,10 +213,10 @@ open Fluid.xcodeproj
 
 Build and run in Xcode. All dependencies are managed via Swift Package Manager.
 
-### Build Only (No Signing)
+Run the build using the script: `./build.sh`
 
 ```bash
-xcodebuild -project Fluid.xcodeproj -scheme Fluid -destination 'platform=macOS' build CODE_SIGNING_ALLOWED=NO
+./build.sh
 ```
 
 ---
