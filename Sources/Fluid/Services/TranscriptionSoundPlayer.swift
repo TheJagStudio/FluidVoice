@@ -47,12 +47,27 @@ final class TranscriptionSoundPlayer {
         let settings = SettingsStore.shared
         let desiredVolume = overrideVolume ?? settings.transcriptionSoundVolume
 
+        var playerVolume = desiredVolume
+        var needsSystemVolumeBoost = false
+        var systemVolumeBeforeBoost: Float = 1.0
+
         if settings.transcriptionSoundIndependentVolume {
             let currentSystemVol = Self.getSystemVolume()
             guard currentSystemVol > 0.001 else { return }
-            // Save current system volume and temporarily set it to desired level
-            self.savedSystemVolume = currentSystemVol
-            Self.setSystemVolume(desiredVolume)
+            // Perceived loudness is playerVolume x systemVolume. Whenever the
+            // desired level fits under the current system volume, compensate
+            // inside the player and leave the system volume alone - changing it
+            // spikes any other audio that happens to be playing (issue #522).
+            if desiredVolume <= currentSystemVol {
+                playerVolume = desiredVolume / currentSystemVol
+            } else {
+                // Louder than the system volume allows: the system volume must be
+                // raised, but only as far as needed and ramped smoothly so the
+                // change never lands as a sudden spike.
+                playerVolume = 1.0
+                needsSystemVolumeBoost = true
+                systemVolumeBeforeBoost = currentSystemVol
+            }
         }
 
         do {
@@ -66,25 +81,31 @@ final class TranscriptionSoundPlayer {
             }
 
             player.currentTime = 0
-            if settings.transcriptionSoundIndependentVolume {
-                player.volume = 1.0
-            } else {
-                player.volume = desiredVolume
+            player.volume = playerVolume
+
+            if needsSystemVolumeBoost {
+                // If a previous boost is still pending restore, keep its saved
+                // (pre-boost) value so overlapping sounds never adopt a boosted
+                // level as the volume to restore.
+                self.savedSystemVolume = self.savedSystemVolume ?? systemVolumeBeforeBoost
+                Self.rampSystemVolume(to: desiredVolume)
             }
+
             player.play()
 
             // Restore system volume after the sound finishes
-            if settings.transcriptionSoundIndependentVolume, let saved = self.savedSystemVolume {
+            if needsSystemVolumeBoost {
                 let duration = player.duration
                 DispatchQueue.main.asyncAfter(deadline: .now() + duration + 0.05) { [weak self] in
-                    Self.setSystemVolume(saved)
-                    self?.savedSystemVolume = nil
+                    guard let self, let saved = self.savedSystemVolume else { return }
+                    Self.rampSystemVolume(to: saved)
+                    self.savedSystemVolume = nil
                 }
             }
         } catch {
             // Restore system volume on error
             if let saved = self.savedSystemVolume {
-                Self.setSystemVolume(saved)
+                Self.rampSystemVolume(to: saved)
                 self.savedSystemVolume = nil
             }
             DebugLogger.shared.error(
@@ -96,7 +117,30 @@ final class TranscriptionSoundPlayer {
 
     // MARK: - System Volume via CoreAudio
 
-    private static func getDefaultOutputDeviceID() -> AudioObjectID? {
+    /// Moves the system output volume to `target` in small steps instead of a
+    /// single jump, so any other audio playing changes level smoothly rather
+    /// than spiking (issue #522).
+    private nonisolated static func rampSystemVolume(
+        to target: Float,
+        duration: TimeInterval = 0.12,
+        steps: Int = 8
+    ) {
+        let start = self.getSystemVolume()
+        guard abs(start - target) > 0.001 else { return }
+
+        let stepDelayMicros = useconds_t((duration / Double(steps)) * 1_000_000)
+        DispatchQueue.global(qos: .userInteractive).async {
+            for step in 1...steps {
+                let fraction = Float(step) / Float(steps)
+                self.setSystemVolume(start + (target - start) * fraction)
+                if step < steps {
+                    usleep(stepDelayMicros)
+                }
+            }
+        }
+    }
+
+    private nonisolated static func getDefaultOutputDeviceID() -> AudioObjectID? {
         var address = AudioObjectPropertyAddress(
             mSelector: kAudioHardwarePropertyDefaultOutputDevice,
             mScope: kAudioObjectPropertyScopeGlobal,
@@ -116,7 +160,7 @@ final class TranscriptionSoundPlayer {
         return deviceID
     }
 
-    static func getSystemVolume() -> Float {
+    nonisolated static func getSystemVolume() -> Float {
         guard let deviceID = getDefaultOutputDeviceID() else { return 1.0 }
         var address = AudioObjectPropertyAddress(
             mSelector: kAudioHardwareServiceDeviceProperty_VirtualMainVolume,
@@ -130,7 +174,7 @@ final class TranscriptionSoundPlayer {
         return volume
     }
 
-    private static func setSystemVolume(_ volume: Float) {
+    private nonisolated static func setSystemVolume(_ volume: Float) {
         guard let deviceID = getDefaultOutputDeviceID() else { return }
         var address = AudioObjectPropertyAddress(
             mSelector: kAudioHardwareServiceDeviceProperty_VirtualMainVolume,

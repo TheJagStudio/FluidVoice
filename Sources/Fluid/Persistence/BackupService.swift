@@ -77,6 +77,8 @@ struct SettingsBackupPayload: Codable, Equatable {
     let gaavModeEnabled: Bool
     let gaavLowercaseFirstLetterEnabled: Bool?
     let gaavRemoveTrailingPeriodEnabled: Bool?
+    let pressEnterPhraseEnabled: Bool?
+    let pressEnterTriggerPhrase: String?
     let continuousDictationModeEnabled: Bool?
     let continuousDictationSpacingEnabled: Bool?
     let contextAwareCapitalizationEnabled: Bool?

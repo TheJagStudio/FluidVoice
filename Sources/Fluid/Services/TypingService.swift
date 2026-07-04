@@ -241,6 +241,142 @@ final class TypingService {
         return app.activate(options: [.activateAllWindows, .activateIgnoringOtherApps])
     }
 
+    // MARK: - Spoken Enter command (issue #523)
+
+    /// A piece of dictated output: either literal text to insert, or a native
+    /// Return keystroke triggered by the spoken phrase (e.g. "press enter").
+    enum SpokenOutputSegment: Equatable {
+        case text(String)
+        case pressEnter
+    }
+
+    /// Splits `text` on the configured spoken Enter trigger phrase. Returns nil when the
+    /// feature is disabled or the phrase does not occur, so callers fall back to the
+    /// plain insertion path. Punctuation the transcriber attaches around the phrase
+    /// (e.g. "…, press enter.") is swallowed together with the phrase.
+    static func splitSpokenEnterCommands(_ text: String) -> [SpokenOutputSegment]? {
+        guard SettingsStore.shared.pressEnterPhraseEnabled else { return nil }
+        let phrase = SettingsStore.shared.pressEnterTriggerPhrase
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !phrase.isEmpty else { return nil }
+
+        // Allow any whitespace between the words of the phrase.
+        let words = phrase.split(whereSeparator: { $0.isWhitespace })
+            .map { NSRegularExpression.escapedPattern(for: String($0)) }
+        guard !words.isEmpty else { return nil }
+        let phrasePattern = words.joined(separator: "\\s+")
+        let pattern = "(?:[,.;:!?]\\s*)?\\b" + phrasePattern + "\\b[,.;:!?]?"
+        guard let regex = try? NSRegularExpression(pattern: pattern, options: .caseInsensitive) else {
+            return nil
+        }
+
+        let nsText = text as NSString
+        let matches = regex.matches(in: text, range: NSRange(location: 0, length: nsText.length))
+        guard !matches.isEmpty else { return nil }
+
+        var segments: [SpokenOutputSegment] = []
+        var cursor = 0
+        for match in matches {
+            let before = nsText
+                .substring(with: NSRange(location: cursor, length: match.range.location - cursor))
+                .trimmingCharacters(in: .whitespacesAndNewlines)
+            if !before.isEmpty {
+                segments.append(.text(before))
+            }
+            segments.append(.pressEnter)
+            cursor = match.range.location + match.range.length
+        }
+        let tail = nsText.substring(from: cursor).trimmingCharacters(in: .whitespacesAndNewlines)
+        if !tail.isEmpty {
+            segments.append(.text(tail))
+        }
+        return segments
+    }
+
+    /// Posts a real Return keystroke (kVK_Return). Unlike inserting a "\n" character via
+    /// paste, a native keystroke submits in terminals where bracketed paste mode treats
+    /// pasted newlines as literal characters (issue #523).
+    func pressReturnKey(preferredTargetPID: pid_t?) {
+        let returnKeyCode: CGKeyCode = 36 // kVK_Return
+        guard let keyDown = CGEvent(keyboardEventSource: nil, virtualKey: returnKeyCode, keyDown: true),
+              let keyUp = CGEvent(keyboardEventSource: nil, virtualKey: returnKeyCode, keyDown: false)
+        else {
+            self.log("[TypingService] ERROR: Failed to create Return key CGEvents")
+            return
+        }
+
+        let targetPID = preferredTargetPID.flatMap { $0 > 0 ? $0 : nil }
+            ?? self.getSystemFocusedElementAndPID()?.pid
+
+        if let targetPID {
+            keyDown.postToPid(targetPID)
+            usleep(10_000)
+            keyUp.postToPid(targetPID)
+            self.log("[TypingService] Return keystroke posted to PID \(targetPID)")
+        } else {
+            keyDown.post(tap: .cghidEventTap)
+            usleep(10_000)
+            keyUp.post(tap: .cghidEventTap)
+            self.log("[TypingService] Return keystroke posted via HID tap")
+        }
+    }
+
+    /// Types text/Return segments sequentially. Mirrors the guards of typeTextInstantly,
+    /// then inserts each text chunk and emits native Return keystrokes between them.
+    private func typeSegmentsInstantly(
+        _ segments: [SpokenOutputSegment],
+        preferredTargetPID: pid_t?
+    ) {
+        guard !segments.isEmpty else { return }
+
+        guard !self.isCurrentlyTyping else {
+            self.log("[TypingService] WARNING: Skipping segment injection - already in progress")
+            return
+        }
+
+        guard AXIsProcessTrusted() else {
+            self.log("[TypingService] ERROR: Accessibility permissions required for segment injection")
+            return
+        }
+
+        self.isCurrentlyTyping = true
+
+        let mode = self.textInsertionMode
+        let settleDelayMs: Int = {
+            if mode == .reliablePaste {
+                return preferredTargetPID == nil ? 80 : 0
+            }
+            return preferredTargetPID == nil ? 200 : 0
+        }()
+
+        DispatchQueue.global(qos: .userInitiated).async {
+            defer { self.isCurrentlyTyping = false }
+
+            if settleDelayMs > 0 {
+                usleep(useconds_t(settleDelayMs * 1000))
+            }
+
+            for (index, segment) in segments.enumerated() {
+                switch segment {
+                case .text(let chunk):
+                    self.insertTextInstantly(chunk, preferredTargetPID: preferredTargetPID)
+                    // Paste-based insertion is dispatched asynchronously by the target
+                    // app; give the text time to land before a following Return so the
+                    // keystroke doesn't submit an empty line.
+                    if index < segments.count - 1 {
+                        usleep(300_000)
+                    }
+                case .pressEnter:
+                    self.pressReturnKey(preferredTargetPID: preferredTargetPID)
+                    if index < segments.count - 1 {
+                        usleep(120_000)
+                    }
+                }
+            }
+            self.log("[TypingService] Completed spoken-command segment injection (\(segments.count) segments)")
+        }
+    }
+
     // MARK: - Public API
 
     func typeTextInstantly(_ text: String) {
@@ -270,6 +406,17 @@ final class TypingService {
         )
         self.log("[TypingService] ENTRY: typeTextInstantly called with text length: \(text.count)")
         self.log("[TypingService] Text preview: \"\(String(text.prefix(100)))\"")
+
+        // Spoken Enter command (issue #523): when the transcript contains the trigger
+        // phrase, route through the segment pipeline so a native Return keystroke is
+        // emitted where the phrase was spoken. Checked before the empty guard so a
+        // transcript consisting only of the phrase still presses Enter.
+        if let segments = Self.splitSpokenEnterCommands(text) {
+            self.bench("request_segments count=\(segments.count)")
+            self.log("[TypingService] Spoken Enter command detected, typing \(segments.count) segment(s)")
+            self.typeSegmentsInstantly(segments, preferredTargetPID: preferredTargetPID)
+            return
+        }
 
         guard text.isEmpty == false else {
             self.bench("request_return reason=empty_text")
