@@ -365,7 +365,7 @@ struct SettingsView: View {
                                 self.settingsToggleRow(
                                     title: "Independent Volume",
                                     description: "Sound volume stays constant regardless of system volume. Mute is still respected.",
-                                    footnote: "Temporarily changes system volume during playback, which may briefly affect other audio.",
+                                    footnote: "Only adjusts system volume when the cue is louder than the current system volume, ramping smoothly to avoid sudden spikes.",
                                     isOn: Binding(
                                         get: { SettingsStore.shared.transcriptionSoundIndependentVolume },
                                         set: { SettingsStore.shared.transcriptionSoundIndependentVolume = $0 }
@@ -967,6 +967,35 @@ struct SettingsView: View {
                                             set: { SettingsStore.shared.pauseMediaDuringTranscription = $0 }
                                         )
                                     )
+                                    Divider().opacity(0.2)
+
+                                    self.optionToggleRow(
+                                        title: "Press Enter by Voice",
+                                        description: "Say the trigger phrase while dictating to send a real Return keystroke. Unlike inserting a newline, this also submits in terminals.",
+                                        isOn: Binding(
+                                            get: { SettingsStore.shared.pressEnterPhraseEnabled },
+                                            set: { SettingsStore.shared.pressEnterPhraseEnabled = $0 }
+                                        )
+                                    )
+
+                                    if SettingsStore.shared.pressEnterPhraseEnabled {
+                                        HStack {
+                                            Text("Trigger phrase")
+                                                .font(self.theme.typography.bodySmall)
+                                                .foregroundStyle(self.settingsSecondaryText)
+                                                .padding(.leading, 30)
+
+                                            Spacer()
+
+                                            TextField("press enter", text: Binding(
+                                                get: { SettingsStore.shared.pressEnterTriggerPhrase },
+                                                set: { SettingsStore.shared.pressEnterTriggerPhrase = $0 }
+                                            ))
+                                            .textFieldStyle(.roundedBorder)
+                                            .frame(width: 190)
+                                        }
+                                        .padding(.top, 2)
+                                    }
                                     Divider().opacity(0.2)
 
                                     self.optionToggleRow(

@@ -1286,14 +1286,14 @@ final class SettingsStore: ObservableObject {
         }
     }
 
-    /// Show the main window when macOS launches FluidVoice at login (default: ON, matching
-    /// current behavior). When off, login launches boot silently in the menu bar. Manual
-    /// launches always show the window. Default-true semantics so existing installs keep
-    /// their current behavior.
+    /// Show the main window when macOS launches FluidVoice at login (default: OFF, issue
+    /// #520 - login launches should start silently in the menu bar without any GUI window).
+    /// When off, login launches boot silently in the menu bar. Manual launches always show
+    /// the window.
     var showMainWindowAtLoginLaunch: Bool {
         get {
             let value = self.defaults.object(forKey: Keys.showMainWindowAtLoginLaunch)
-            if value == nil { return true }
+            if value == nil { return false }
             return self.defaults.bool(forKey: Keys.showMainWindowAtLoginLaunch)
         }
         set {
@@ -2860,6 +2860,8 @@ final class SettingsStore: ObservableObject {
             gaavModeEnabled: self.gaavModeEnabled,
             gaavLowercaseFirstLetterEnabled: self.gaavLowercaseFirstLetterEnabled,
             gaavRemoveTrailingPeriodEnabled: self.gaavRemoveTrailingPeriodEnabled,
+            pressEnterPhraseEnabled: self.pressEnterPhraseEnabled,
+            pressEnterTriggerPhrase: self.pressEnterTriggerPhrase,
             continuousDictationModeEnabled: self.continuousDictationModeEnabled,
             continuousDictationSpacingEnabled: self.continuousDictationSpacingEnabled,
             contextAwareCapitalizationEnabled: self.contextAwareCapitalizationEnabled,
@@ -2932,7 +2934,7 @@ final class SettingsStore: ObservableObject {
         }
         self.showThinkingTokens = payload.showThinkingTokens
         self.hideFromDockAndAppSwitcher = payload.hideFromDockAndAppSwitcher
-        self.showMainWindowAtLoginLaunch = payload.showMainWindowAtLoginLaunch ?? true
+        self.showMainWindowAtLoginLaunch = payload.showMainWindowAtLoginLaunch ?? false
         self.accentColorOption = payload.accentColorOption
         self.transcriptionStartSound = payload.transcriptionStartSound
         self.transcriptionSoundVolume = payload.transcriptionSoundVolume
@@ -2972,6 +2974,8 @@ final class SettingsStore: ObservableObject {
         self.gaavModeEnabled = restoredGaavModeEnabled
         self.gaavLowercaseFirstLetterEnabled = payload.gaavLowercaseFirstLetterEnabled ?? restoredGaavModeEnabled
         self.gaavRemoveTrailingPeriodEnabled = payload.gaavRemoveTrailingPeriodEnabled ?? restoredGaavModeEnabled
+        self.pressEnterPhraseEnabled = payload.pressEnterPhraseEnabled ?? false
+        self.pressEnterTriggerPhrase = payload.pressEnterTriggerPhrase ?? "press enter"
         self.continuousDictationModeEnabled = restoredContinuousDictationModeEnabled
         self.continuousDictationSpacingEnabled = payload.continuousDictationSpacingEnabled ?? restoredContinuousDictationModeEnabled
         self.contextAwareCapitalizationEnabled = payload.contextAwareCapitalizationEnabled ?? restoredContinuousDictationModeEnabled
@@ -3595,6 +3599,35 @@ final class SettingsStore: ObservableObject {
         set {
             objectWillChange.send()
             self.defaults.set(newValue, forKey: Keys.gaavRemoveTrailingPeriodEnabled)
+        }
+    }
+
+    // MARK: - Press Enter by Voice (issue #523)
+
+    /// When enabled, saying the trigger phrase (default "press enter") during dictation
+    /// posts a real Return keystroke instead of inserting text. Unlike pasting a "\n",
+    /// a native keystroke also submits in terminals where bracketed paste treats pasted
+    /// newlines as literal characters.
+    var pressEnterPhraseEnabled: Bool {
+        get { self.defaults.object(forKey: Keys.pressEnterPhraseEnabled) as? Bool ?? false }
+        set {
+            objectWillChange.send()
+            self.defaults.set(newValue, forKey: Keys.pressEnterPhraseEnabled)
+        }
+    }
+
+    /// The spoken phrase that triggers a Return keystroke. Falls back to "press enter"
+    /// when unset or whitespace-only, so the feature can never be armed with an empty trigger.
+    var pressEnterTriggerPhrase: String {
+        get {
+            let stored = self.defaults.string(forKey: Keys.pressEnterTriggerPhrase)?
+                .trimmingCharacters(in: .whitespacesAndNewlines)
+            guard let stored, !stored.isEmpty else { return "press enter" }
+            return stored
+        }
+        set {
+            objectWillChange.send()
+            self.defaults.set(newValue, forKey: Keys.pressEnterTriggerPhrase)
         }
     }
 
@@ -4524,6 +4557,8 @@ private extension SettingsStore {
         static let gaavModeEnabled = "GAAVModeEnabled"
         static let gaavLowercaseFirstLetterEnabled = "GAAVLowercaseFirstLetterEnabled"
         static let gaavRemoveTrailingPeriodEnabled = "GAAVRemoveTrailingPeriodEnabled"
+        static let pressEnterPhraseEnabled = "PressEnterPhraseEnabled"
+        static let pressEnterTriggerPhrase = "PressEnterTriggerPhrase"
 
         /// Continuous Dictation Mode (append trailing space + smart caps for chaining)
         static let continuousDictationModeEnabled = "ContinuousDictationModeEnabled"

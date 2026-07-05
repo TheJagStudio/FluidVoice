@@ -8,6 +8,7 @@
 import AppKit
 import Carbon
 import PromiseKit
+import ServiceManagement
 import SwiftUI
 import UserNotifications
 
@@ -94,6 +95,12 @@ class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCenterDele
     func applicationShouldHandleReopen(_ sender: NSApplication, hasVisibleWindows flag: Bool) -> Bool {
         if self.shouldSuppressNextReopenActivation {
             self.shouldSuppressNextReopenActivation = false
+            // This reopen came from our own silent login-launch fallback. The reopen
+            // realizes the SwiftUI main window, so immediately boot it hidden instead of
+            // letting it flash on screen until the launch retry loop catches it (#520).
+            DispatchQueue.main.async { [weak self] in
+                _ = self?.bootMainWindowHiddenIfPresent()
+            }
             return true
         }
 
@@ -135,10 +142,31 @@ class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCenterDele
         if ProcessInfo.processInfo.environment["FLUID_SIMULATE_LOGIN_LAUNCH"] == "1" {
             return true
         }
-        guard let event = NSAppleEventManager.shared().currentAppleEvent else { return false }
-        return event.eventID == AEEventID(kAEOpenApplication)
-            && event.paramDescriptor(forKeyword: AEKeyword(keyAEPropData))?.enumCodeValue
-            == OSType(keyAELaunchedAsLogInItem)
+
+        if let event = NSAppleEventManager.shared().currentAppleEvent,
+           event.eventID == AEEventID(kAEOpenApplication),
+           event.paramDescriptor(forKeyword: AEKeyword(keyAEPropData))?.enumCodeValue
+           == OSType(keyAELaunchedAsLogInItem)
+        {
+            return true
+        }
+
+        // SMAppService login launches on modern macOS frequently arrive WITHOUT the
+        // legacy login-item Apple Event flag, which made the app treat login launches
+        // as manual ones and show the main window on every reboot (issue #520).
+        // Heuristic fallback: FluidVoice is registered as a login item and the process
+        // started shortly after boot - a manual launch that early is very unlikely.
+        if SMAppService.mainApp.status == .enabled,
+           ProcessInfo.processInfo.systemUptime < 300
+        {
+            DebugLogger.shared.info(
+                "Login-item launch inferred (SMAppService enabled, uptime \(Int(ProcessInfo.processInfo.systemUptime))s)",
+                source: "AppDelegate"
+            )
+            return true
+        }
+
+        return false
     }
 
     /// Apply the user's dock-visibility preference ("Hide from dock", issue #162).
